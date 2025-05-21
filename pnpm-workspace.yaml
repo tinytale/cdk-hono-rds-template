@@ -1,0 +1,5 @@
+saveExact: true
+engineStrict: true
+packages:
+  - "apps/*"
+  - "packages/*"

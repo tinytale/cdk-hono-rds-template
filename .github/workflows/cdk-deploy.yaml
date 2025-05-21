@@ -1,0 +1,35 @@
+name: 🚀 cdk-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "diff or deploy"
+        required: true
+        type: choice
+        options:
+          - diff
+          - deploy
+      dev:
+        description: "dev（529003812282）"
+        required: false
+        type: boolean
+
+      prod:
+        description: "prod（hao）"
+        required: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    if: ${{ inputs.dev }}
+    uses: ./.github/workflows/cdk-setup.yaml
+    with:
+      actions: ${{ inputs.action }}
+      stack: DebugStack
+      role: arn:aws:iam::637423391958:role/oidc-role-github-actions
+      package_name: cdk

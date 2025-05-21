@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "es2022"
+    ],
+    "outDir": "./dist",
+    "noEmit": false,
+    "declaration": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "skipLibCheck": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": false,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false,
+    "paths": {
+      "@/*":["./src/*"],
+      "@prisma/*":["./prisma/*"]
+    },
+  },
+  "include": [
+    "./src/**/*",
+    "./models/**/*.ts",
+    "vitest.d.ts",
+    "prisma.config.ts",
+    "./scripts/**/*"
+  ], 
+  "exclude": [
+    "node_modules",
+    "cdk.out",
+    "dist"
+  ]
+}

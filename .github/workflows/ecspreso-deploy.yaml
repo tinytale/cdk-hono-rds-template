@@ -1,0 +1,153 @@
+name: 🚀 ecspresso-deploy
+on:
+  workflow_dispatch:
+    inputs:
+      prod-db-deploy:
+        description: "DB deploy to production"
+        required: true
+        default: false
+        type: boolean
+
+  push:
+    branches:
+      - develop
+
+env:
+  TZ: Asia/Tokyo
+  APP_DIR: ./apps/app
+  OIDC_ROLE: arn:aws:iam::637423391958:role/oidc-role-github-actions
+  MIGRATE_CONTEXT: ./apps/app
+  MIGRATE_DOCKERFILE: ./apps/app/Dockerfile.migrate
+  JUMP_CONTEXT: ./apps/app
+  JUMP_DOCKERFILE: ./apps/app/Dockerfile.jump
+  APP_DOCKERFILE: ./apps/app/Dockerfile.app
+  PREFIX_ECSPRESSO_DIR: ./apps/ecspresso
+  MIGRATE_ECSPRESSO_CONFIG_PATH: migrate/ecspresso.yaml
+  APP_ECSPRESSO_CONFIG_PATH: app/ecspresso.yaml
+  JUMP_ECSPRESSO_CONFIG_PATH: jump/ecspresso.yaml
+
+permissions:
+  contents: read
+  id-token: write
+  statuses: write
+  actions: write
+  pull-requests: write
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+      jump: ${{ steps.filter.outputs.jump }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            migrations:
+              - '${{env.APP_DIR}}/prisma/migrations/**'
+            app:
+              - '${{env.APP_DIR}}/src/**' 
+              - '${{env.APP_DIR}}/prisma/**'
+            jump:
+              - '${{env.APP_DIR}}/Dockerfile.jump'
+
+  app-ecs-deploy:
+    env:
+      REGISTRY: 637423391958.dkr.ecr.ap-northeast-1.amazonaws.com
+      REPOSITORY: repo-cdk-hono-template-app
+    needs:
+      - filter
+      #　dbのマイグレーションを本当は先にやるべきだが開発環境は並列で実行する
+      # 本番は必ずマイグレーションを実行してからアプリのデプロイを行う
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.OIDC_ROLE }}
+          aws-region: ap-northeast-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}
+          tags: |
+            type=raw,value=latest
+            type=schedule,pattern={{date 'YYYYMMDD-hhmm'}}
+            type=ref,event=pr
+            type=sha,format=short
+            type=ref,event=branch
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ env.APP_DOCKERFILE }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          provenance: false
+
+      - uses: kayac/ecspresso@v2
+        with:
+          version: latest
+      - name: ecspresso deploy
+        run: |
+          ecspresso --config ${{ env.PREFIX_ECSPRESSO_DIR }}/dev/${{ env.APP_ECSPRESSO_CONFIG_PATH }} \
+          deploy
+
+  db-migrate-run:
+    needs: filter
+    env:
+      REGISTRY: 637423391958.dkr.ecr.ap-northeast-1.amazonaws.com
+      REPOSITORY: repo-cdk-hono-template-migrate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEV_OIDC_ROLE }}
+          aws-region: ap-northeast-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}
+          tags: |
+            type=raw,value=latest
+            type=schedule,pattern={{date 'YYYYMMDD-hhmm'}}
+            type=ref,event=pr
+            type=sha,format=short
+            type=ref,event=branch
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.MIGRATE_CONTEXT }}
+          file: ${{ env.MIGRATE_DOCKERFILE }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          provenance: false
+
+      - uses: kayac/ecspresso@v2
+        with:
+          version: latest
+      - name: espresso deploy
+        run: |
+          ecspresso --config ${{ env.PREFIX_ECSPRESSO_DIR }}/dev/${{ env.MIGRATE_ECSPRESSO_CONFIG_PATH }} \
+          run

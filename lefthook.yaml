@@ -1,0 +1,8 @@
+pre-commit:
+  parallel: true
+  commands:
+    api-lint:
+      root: "apps/apappi/"
+      glob: "./src/**/*.{js,ts,jsx,tsx,json}"
+      run: pnpm lint {staged_files}
+      stage_fixed: true

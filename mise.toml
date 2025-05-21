@@ -1,0 +1,4 @@
+[tools]
+ecspresso = "2.6.1"
+node = "24.10.0"
+terraform = "1.12.1"
