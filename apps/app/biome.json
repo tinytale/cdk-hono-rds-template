@@ -1,0 +1,19 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.2.6/schema.json",
+  "root": false,
+  "extends": "//",
+  "files": {
+    "includes": [
+      "**",
+      "!dist",
+      "!node_modules",
+      "!src/.prisma",
+      "!src/.prisma-zod",
+      "!src/.factory",
+      "!doc.ts",
+      "!docs/erd",
+      "!scripts",
+      "!coverage"
+    ]
+  }
+}

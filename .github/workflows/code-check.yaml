@@ -1,0 +1,281 @@
+name: 💊 code-checks
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - main
+
+  pull_request:
+    branches:
+      - develop
+
+env:
+  TZ: Asia/Tokyo
+  PACKAGE_NAME: app
+  APP_DIR: apps/app
+  S3_BUCKET_NAME: debug-bukect-x056
+  OIDC_ROLE: arn:aws:iam::637423391958:role/oidc-role-github-actions
+
+permissions:
+  contents: read
+  id-token: write
+  statuses: write
+  actions: write
+  pull-requests: write
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      cdk: ${{ steps.filter.outputs.cdk }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            migrations:
+              - '${{env.APP_DIR}}/prisma/migrations/**'
+            app:
+              - '${{env.APP_DIR}}/src/**' 
+              - '${{env.APP_DIR}}/prisma/**'
+            jump:
+              - '${{env.APP_DIR}}/Dockerfile.jump'
+
+  docker-build:
+    needs: filter
+    # if: ${{ needs.filter.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{env.APP_DIR}}/Dockerfile.app
+          push: false
+          tags: app:latest
+          platforms: linux/amd64
+          provenance: false
+  test:
+    needs: filter
+    # if: ${{ needs.filter.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      S3_DIRECTORY_NAME: ${{ github.event.repository.name }}/${{ github.ref_name }}/test-coverage
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: "package.json"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: test & coverage
+        run: pnpm run turbo --filter=${{ env.PACKAGE_NAME }} test
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{env.OIDC_ROLE}}
+          aws-region: ap-northeast-1
+
+      - name: Upload Test Coverage to S3
+        run: |
+          aws s3 sync apps/${{ env.PACKAGE_NAME }}/coverage/ s3://${{ env.S3_BUCKET_NAME }}/${{ env.S3_DIRECTORY_NAME }} --delete
+      - name: Comment to PR
+        uses: guibranco/github-status-action-v2@v1.1.13
+        continue-on-error: true
+        with:
+          authToken: ${{secrets.GITHUB_TOKEN}}
+          context: "✅ Test Coverage Link"
+          description: "Test Coverage Build Successful"
+          state: "success"
+          sha: ${{github.event.pull_request.head.sha || github.sha}}
+          target_url: https://${{ env.S3_BUCKET_NAME }}.s3.amazonaws.com/${{ env.S3_DIRECTORY_NAME }}/index.html
+
+  tsc-app:
+    needs: filter
+    # if: ${{ needs.filter.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Launch Turbo Remote Cache Server
+        uses: rharkor/caching-for-turbo@v2.3.2
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: tsc
+        run: pnpm run turbo tsc --filter=${{ env.PACKAGE_NAME }}
+
+  tsc-cdk:
+    needs: filter
+    if: ${{ needs.filter.outputs.cdk == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Launch Turbo Remote Cache Server
+        uses: rharkor/caching-for-turbo@v2.3.2
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: "package.json"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: tsc
+        run: pnpm run turbo tsc --filter=cdk
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm turbo run lint
+
+  openapi-redoc:
+    needs: filter
+    # if: ${{ needs.filter.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      S3_DIRECTORY_NAME: ${{ github.event.repository.name }}/${{ github.ref_name }}/openapi/redoc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+          cache: "pnpm"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{env.OIDC_ROLE}}
+          aws-region: ap-northeast-1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate OpenAPI Redoc
+        run: |
+          pnpm run --filter=${{ env.PACKAGE_NAME }} gen:redoc
+
+      - name: Upload Redoc to S3
+        run: |
+          aws s3 sync apps/${{ env.PACKAGE_NAME }}/docs/redoc/ s3://${{ env.S3_BUCKET_NAME }}/${{ env.S3_DIRECTORY_NAME }} --delete
+
+      - name: Comment to PR
+        uses: guibranco/github-status-action-v2@v1.1.13
+        continue-on-error: true
+        with:
+          authToken: ${{secrets.GITHUB_TOKEN}}
+          context: "✅ OpenAPI Redoc Link"
+          description: "OpenAPI Redoc Build Successful"
+          state: "success"
+          sha: ${{github.event.pull_request.head.sha || github.sha}}
+          target_url: https://${{ env.S3_BUCKET_NAME }}.s3.amazonaws.com/${{ env.S3_DIRECTORY_NAME }}/index.html
+
+  erd-liam:
+    needs: filter
+    # if: ${{ needs.filter.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      S3_DIRECTORY_NAME: ${{ github.event.repository.name }}/${{ github.ref_name }}/erd
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+          # cache: "pnpm"
+
+      - name: Generate ERD
+        run: npx @liam-hq/cli erd build --format prisma --input "apps/${{ env.PACKAGE_NAME }}/prisma/**/*.prisma"  --output-dir "apps/${{ env.PACKAGE_NAME }}/docs/erd"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{env.OIDC_ROLE}}
+          aws-region: ap-northeast-1
+
+      - name: Upload ERD to S3
+        run: |
+          aws s3 sync apps/${{ env.PACKAGE_NAME }}/docs/erd/ s3://${{ env.S3_BUCKET_NAME }}/${{ env.S3_DIRECTORY_NAME }} --delete
+      - name: Comment to PR
+        uses: guibranco/github-status-action-v2@v1.1.13
+        continue-on-error: true
+        with:
+          authToken: ${{secrets.GITHUB_TOKEN}}
+          context: "✅ ERD Link"
+          description: "ERD Build Successful"
+          state: "success"
+          sha: ${{github.event.pull_request.head.sha || github.sha}}
+          target_url: https://${{ env.S3_BUCKET_NAME }}.s3.amazonaws.com/${{ env.S3_DIRECTORY_NAME }}/index.html

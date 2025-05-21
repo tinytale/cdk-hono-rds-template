@@ -1,0 +1,46 @@
+name: cdk-setup
+
+on:
+  workflow_call:
+    inputs:
+      actions:
+        required: true
+        type: string
+        default: "deploy"
+      stack:
+        required: true
+        type: string
+      role:
+        required: true
+        type: string
+      package_name:
+        required: true
+        type: string
+
+jobs:
+  run-cdk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.role }}
+          aws-region: ap-northeast-1
+
+      - name: Corepack Enable
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: cdk ${{ inputs.actions }}
+        run: pnpm --filter ${{inputs.package_name}} run cdk ${{ inputs.actions }} ${{ inputs.stack }} --require-approval never
